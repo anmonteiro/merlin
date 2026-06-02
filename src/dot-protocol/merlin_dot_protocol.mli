@@ -82,9 +82,16 @@ end
 
 type directive = Directive.Processed.t
 
+type configuration =
+  { id : string
+  ; mode : string option
+  ; is_default : bool
+  ; directives : directive list
+  }
+
 type read_error = Unexpected_output of string | Csexp_parse_error of string
 
-type command = File of string | Halt | Unknown
+type command = File of string | File_configurations of string | Halt | Unknown
 
 module type S = sig
   type 'a io
@@ -98,10 +105,17 @@ module type S = sig
 
   val write : out_chan -> directive list -> unit io
 
+  val read_configurations :
+    in_chan -> (configuration list, read_error) Merlin_utils.Std.Result.t io
+
+  val write_configurations : out_chan -> configuration list -> unit io
+
   module Commands : sig
     val read_input : in_chan -> command io
 
     val send_file : out_chan -> string -> unit io
+
+    val send_file_configurations : out_chan -> string -> unit io
 
     val halt : out_chan -> unit io
   end

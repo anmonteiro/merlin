@@ -70,6 +70,15 @@ end
 
 type directive = Directive.Processed.t
 
+type configuration =
+  { id : string
+  ; mode : string option
+  ; is_default : bool
+  ; directives : directive list
+  }
+
+type read_error = Unexpected_output of string | Csexp_parse_error of string
+
 module Sexp = struct
   type t = Csexp.t = Atom of string | List of t list
 
@@ -151,11 +160,80 @@ module Sexp = struct
       List (Atom tag :: body)
     in
     List (List.map ~f directives)
+
+  let string_field name value = List [ Atom name; Atom value ]
+  let bool_field name value = string_field name (if value then "true" else "false")
+
+  let option_string_field name = function
+    | None -> []
+    | Some value -> [ string_field name value ]
+  ;;
+
+  let from_configuration { id; mode; is_default; directives } =
+    List
+      (List.concat
+         [ [ Atom "CONFIG"
+           ; string_field "ID" id
+           ; bool_field "DEFAULT" is_default
+           ; List [ Atom "DIRECTIVES"; from_directives directives ]
+           ]
+         ; option_string_field "MODE" mode
+         ])
+  ;;
+
+  let configuration_of_sexp sexp =
+    let unexpected () = Error "Unexpected configuration from external config reader" in
+    match sexp with
+    | List (Atom "CONFIG" :: fields) ->
+      let rec loop id mode is_default directives = function
+        | [] ->
+          (match id, directives with
+           | Ok id, Ok directives -> Ok { id; mode; is_default; directives }
+           | Error msg, _ | _, Error msg -> Error msg)
+        | List [ Atom "ID"; Atom value ] :: fields ->
+          loop (Ok value) mode is_default directives fields
+        | List [ Atom "MODE"; Atom value ] :: fields ->
+          loop id (Some value) is_default directives fields
+        | List [ Atom "DEFAULT"; Atom value ] :: fields ->
+          loop id mode (String.equal value "true") directives fields
+        | List [ Atom "DIRECTIVES"; List directives ] :: fields ->
+          loop id mode is_default (Ok (List.map directives ~f:to_directive)) fields
+        | _ -> unexpected ()
+      in
+      loop
+        (Error "Missing configuration id from external config reader")
+        None
+        false
+        (Error "Missing configuration directives from external config reader")
+        fields
+    | _ -> unexpected ()
+  ;;
+
+  let configurations_of_sexp = function
+    | List configurations ->
+      let rec loop acc = function
+        | [] -> Ok (List.rev acc)
+        | configuration :: configurations ->
+          (match configuration_of_sexp configuration with
+           | Ok configuration -> loop (configuration :: acc) configurations
+           | Error msg -> Error (Unexpected_output msg))
+      in
+      loop [] configurations
+    | sexp ->
+      let msg =
+        Printf.sprintf
+          "A list of configurations was expected, instead got: \"%s\""
+          (to_string sexp)
+      in
+      Error (Unexpected_output msg)
+  ;;
+
+  let from_configurations configurations =
+    List (List.map configurations ~f:from_configuration)
+  ;;
 end
 
-type read_error = Unexpected_output of string | Csexp_parse_error of string
-
-type command = File of string | Halt | Unknown
+type command = File of string | File_configurations of string | Halt | Unknown
 
 module type S = sig
   type 'a io
@@ -169,10 +247,17 @@ module type S = sig
 
   val write : out_chan -> directive list -> unit io
 
+  val read_configurations :
+    in_chan -> (configuration list, read_error) Merlin_utils.Std.Result.t io
+
+  val write_configurations : out_chan -> configuration list -> unit io
+
   module Commands : sig
     val read_input : in_chan -> command io
 
     val send_file : out_chan -> string -> unit io
+
+    val send_file_configurations : out_chan -> string -> unit io
 
     val halt : out_chan -> unit io
   end
@@ -204,12 +289,18 @@ struct
       let+ input = Chan.read chan in
       match input with
       | Ok (List [ Atom "File"; Atom path ]) -> File path
+      | Ok (List [ Atom "File-Configurations"; Atom path ]) ->
+        File_configurations path
       | Ok (Atom "Halt") -> Halt
       | Ok _ -> Unknown
       | Error _ -> Halt
 
     let send_file chan path =
       Chan.write chan Sexp.(List [ Atom "File"; Atom path ])
+
+    let send_file_configurations chan path =
+      Chan.write chan Sexp.(List [ Atom "File-Configurations"; Atom path ])
+    ;;
 
     let halt chan = Chan.write chan (Sexp.Atom "Halt")
   end
@@ -229,6 +320,18 @@ struct
 
   let write out_chan (directives : directive list) =
     directives |> Sexp.from_directives |> Chan.write out_chan
+
+  let read_configurations chan =
+    let open IO.O in
+    let+ res = Chan.read chan in
+    match res with
+    | Ok sexp -> Sexp.configurations_of_sexp sexp
+    | Error msg -> Error (Csexp_parse_error msg)
+  ;;
+
+  let write_configurations out_chan configurations =
+    configurations |> Sexp.from_configurations |> Chan.write out_chan
+  ;;
 end
 
 module Blocking =
