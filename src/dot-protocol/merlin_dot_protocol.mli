@@ -89,6 +89,13 @@ type configuration =
   ; directives : directive list
   }
 
+type configuration_preference = [ `Id of string | `Mode of string | `Default ]
+
+val select_configuration
+  :  configuration list
+  -> configuration_preference list
+  -> configuration option
+
 type read_error = Unexpected_output of string | Csexp_parse_error of string
 
 type command = File of string | File_configurations of string | Halt | Unknown

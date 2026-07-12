@@ -77,6 +77,39 @@ type configuration =
   ; directives : directive list
   }
 
+type configuration_preference = [ `Id of string | `Mode of string | `Default ]
+
+let select_configuration configurations (preferences : configuration_preference list) =
+  let find = function
+    | `Id id ->
+      List.find_opt configurations ~f:(fun configuration ->
+        String.equal configuration.id id)
+    | `Mode mode ->
+      List.find_opt configurations ~f:(fun configuration ->
+        match configuration.mode with
+        | Some configuration_mode -> String.equal mode configuration_mode
+        | None -> false)
+    | `Default ->
+      (match
+         List.find_opt configurations ~f:(fun configuration ->
+           configuration.is_default)
+       with
+       | Some _ as configuration -> configuration
+       | None ->
+         (match configurations with
+          | [] -> None
+          | configuration :: _ -> Some configuration))
+  in
+  let rec loop = function
+    | [] -> None
+    | preference :: preferences ->
+      (match find preference with
+       | Some _ as configuration -> configuration
+       | None -> loop preferences)
+  in
+  loop preferences
+;;
+
 type read_error = Unexpected_output of string | Csexp_parse_error of string
 
 module Sexp = struct

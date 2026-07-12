@@ -35,12 +35,12 @@ let () =
     | _ -> failwith "expected File_configurations command");
   with_temp_file (fun file ->
     let configurations =
-      [ { Merlin_dot_protocol.id = "lib-foo"
+      [ { Merlin_dot_protocol.id = "lib-foo:ocaml"
         ; mode = Some "ocaml"
         ; is_default = true
         ; directives = [ `B "_build/default/.foo.objs/byte"; `UNIT_NAME "foo" ]
         }
-      ; { Merlin_dot_protocol.id = "lib-foo-melange"
+      ; { Merlin_dot_protocol.id = "lib-foo:melange"
         ; mode = Some "melange"
         ; is_default = false
         ; directives = [ `B "_build/default/.foo.objs/melange"; `UNIT_NAME "foo" ]
@@ -50,7 +50,19 @@ let () =
     write_configurations file configurations;
     match read_configurations file with
     | Merlin_utils.Std.Result.Ok configurations' ->
-      assert (configurations' = configurations)
+      assert (configurations' = configurations);
+      let select preferences expected_id =
+        match
+          Merlin_dot_protocol.select_configuration configurations' preferences
+        with
+        | Some configuration -> assert (String.equal configuration.id expected_id)
+        | None -> failwith "failed to select a configuration"
+      in
+      select
+        [ `Id "lib-foo:melange"; `Mode "ocaml"; `Default ]
+        "lib-foo:melange";
+      select [ `Id "missing"; `Mode "melange"; `Default ] "lib-foo:melange";
+      select [ `Id "missing"; `Mode "missing"; `Default ] "lib-foo:ocaml"
     | Merlin_utils.Std.Result.Error _ -> failwith "failed to read configurations");
   with_temp_file (fun file ->
     write_sexp
