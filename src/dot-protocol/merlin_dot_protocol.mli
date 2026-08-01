@@ -83,9 +83,35 @@ end
 
 type directive = Directive.Processed.t
 
+type source_kind = Implementation | Interface
+
+type configuration =
+  { mode : string;
+    is_default : bool;
+    kind : source_kind;
+    counterpart : string option;
+    directives : Csexp.t
+  }
+
+val configuration_directives : configuration -> directive list
+
+module Nonempty_list : sig
+  type 'a t = private { hd : 'a; tl : 'a list }
+
+  val create : 'a -> 'a list -> 'a t
+  val to_list : 'a t -> 'a list
+end
+
 type read_error = Unexpected_output of string | Csexp_parse_error of string
 
-type command = File of string | Halt | Unknown
+type configurations_error =
+  | Unsupported
+  | Server_error of string
+  | Protocol_error of read_error
+
+type file_configurations_request
+
+type command = File of string | File_configurations of string | Halt | Unknown
 
 module type S = sig
   type 'a io
@@ -99,10 +125,26 @@ module type S = sig
 
   val write : out_chan -> directive list -> unit io
 
+  val read_configurations :
+    request:file_configurations_request ->
+    in_chan ->
+    ( configuration Nonempty_list.t,
+      configurations_error )
+    Merlin_utils.Std.Result.t
+    io
+
+  val write_configurations :
+    out_chan -> configuration Nonempty_list.t -> unit io
+
   module Commands : sig
     val read_input : in_chan -> command io
 
     val send_file : out_chan -> string -> unit io
+
+    (** [send_file_configurations channel path] returns the request token that
+        must be passed to [read_configurations]. *)
+    val send_file_configurations :
+      out_chan -> string -> file_configurations_request io
 
     val halt : out_chan -> unit io
   end
