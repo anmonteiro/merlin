@@ -453,6 +453,11 @@ let rec main () =
     write stdout directives;
     flush stdout;
     main ()
+  | File_configurations _path ->
+    write stdout
+      [ `ERROR_MSG "File-Configurations is not supported by dot-merlin-reader" ];
+    flush stdout;
+    main ()
   | Unknown -> main ()
 
 let () = main ()
