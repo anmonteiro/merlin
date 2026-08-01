@@ -65,6 +65,74 @@ The cache can be enabled via the USE_PPX_CACHE directive
   # . Phase cache - PPX phase
   Cache hit
 
+Reader and PPX caches retain distinct parser configurations. The same source is
+an interface in configuration A and an implementation in configuration B; the
+final A request must both recover A's parse and reuse its cache entries.
+
+  $ cat > mode.ml <<EOF
+  > val value : int
+  > EOF
+  $ cat > .merlin <<EOF
+  > SUFFIX .foo .ml
+  > USE_PPX_CACHE
+  > EOF
+  $ $MERLIN server errors -filename mode.ml -log-file merlin_logs < mode.ml \
+  >   | jq '.value | length'
+  0
+  $ cat merlin_logs | grep 'Phase cache' -A 1 | sed "s/[0-9]*//g"
+  # . Phase cache - Reader phase
+  Cache invalidation
+  --
+  # . Phase cache - PPX phase
+  Cache invalidation
+
+  $ cat > .merlin <<EOF
+  > SUFFIX .ml .mli
+  > USE_PPX_CACHE
+  > EOF
+  $ $MERLIN server errors -filename mode.ml -log-file merlin_logs < mode.ml \
+  >   | jq '.value | length'
+  1
+  $ cat merlin_logs | grep 'Phase cache' -A 1 | sed "s/[0-9]*//g"
+  # . Phase cache - Reader phase
+  Cache invalidation
+  --
+  # . Phase cache - PPX phase
+  Cache invalidation
+
+  $ cat > .merlin <<EOF
+  > SUFFIX .foo .ml
+  > USE_PPX_CACHE
+  > EOF
+  $ $MERLIN server errors -filename mode.ml -log-file merlin_logs < mode.ml \
+  >   | jq '.value | length'
+  0
+  $ cat merlin_logs | grep 'Phase cache' -A 1 | sed "s/[0-9]*//g"
+  # . Phase cache - Reader phase
+  Cache hit
+  # . Phase cache - PPX phase
+  Cache hit
+
+A typing-only flag does not invalidate the reader or PPX caches.
+
+  $ cat > .merlin <<EOF
+  > SUFFIX .foo .ml
+  > FLG -principal
+  > USE_PPX_CACHE
+  > EOF
+  $ $MERLIN server errors -filename mode.ml -log-file merlin_logs < mode.ml \
+  >   | jq '.value | length'
+  0
+  $ cat merlin_logs | grep 'Phase cache' -A 1 | sed "s/[0-9]*//g"
+  # . Phase cache - Reader phase
+  Cache hit
+  # . Phase cache - PPX phase
+  Cache hit
+
+  $ cat > .merlin <<EOF
+  > FLG -ppx '_build/default/.ppx/68ba10540cd1df30ebd46af5ef6706d9/ppx.exe -as-ppx
+  > USE_PPX_CACHE
+  > EOF
 
 Modifying the source code invalidates the cache
   $ cat >main.ml <<EOF

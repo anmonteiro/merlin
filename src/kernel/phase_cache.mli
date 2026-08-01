@@ -1,4 +1,4 @@
-(** An all-or-nothing cache mechanism that can be used for any phase *)
+(** An all-or-nothing, two-entry LRU cache that can be used for any phase *)
 
 module type S = sig
   (** Phase input *)
