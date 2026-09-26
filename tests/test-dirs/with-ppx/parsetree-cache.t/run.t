@@ -113,26 +113,68 @@ final A request must both recover A's parse and reuse its cache entries.
   # . Phase cache - PPX phase
   Cache hit
 
-A typing-only flag does not invalidate the reader or PPX caches.
+Compiler flags are visible to PPXs through their context. This PPX changes the
+type of a binding depending on [-principal], without changing its command.
 
+  $ cat > context_ppx.ml <<'EOF'
+  > let () =
+  >   Ast_mapper.register "context" (fun _ ->
+  >     { Ast_mapper.default_mapper with
+  >       structure = (fun _ _ ->
+  >         let source =
+  >           if !Clflags.principal then "let value = \"principal\""
+  >           else "let value = 0"
+  >         in
+  >         Parse.implementation (Lexing.from_string source))
+  >     })
+  > EOF
+  $ $OCAMLC -I +compiler-libs ocamlcommon.cma context_ppx.ml -o context_ppx.exe
+  $ echo 'let value = 0' > context.ml
   $ cat > .merlin <<EOF
-  > SUFFIX .foo .ml
-  > FLG -principal
+  > FLG -ppx $PWD/context_ppx.exe
   > USE_PPX_CACHE
   > EOF
-  $ $MERLIN server errors -filename mode.ml -log-file merlin_logs < mode.ml \
-  >   | jq '.value | length'
-  0
+  $ $MERLIN server type-enclosing -position 1:5 -filename context.ml < context.ml | jq -r '.value[0].type'
+  int
+
+BUG: the cached expansion ignores the changed PPX context.
+
+  $ cat > .merlin <<EOF
+  > FLG -ppx $PWD/context_ppx.exe -principal
+  > USE_PPX_CACHE
+  > EOF
+  $ $MERLIN server type-enclosing -position 1:5 -filename context.ml < context.ml | jq -r '.value[0].type'
+  int
+
+Returning to the first configuration reuses its cached expansion.
+
+  $ cat > .merlin <<EOF
+  > FLG -ppx $PWD/context_ppx.exe
+  > USE_PPX_CACHE
+  > EOF
+  $ $MERLIN server type-enclosing -position 1:5 -filename context.ml -log-file merlin_logs < context.ml | jq -r '.value[0].type'
+  int
   $ cat merlin_logs | grep 'Phase cache' -A 1 | sed "s/[0-9]*//g"
   # . Phase cache - Reader phase
   Cache hit
   # . Phase cache - PPX phase
   Cache hit
 
+Without the cache, [-principal] correctly changes the expansion.
+
+  $ cat > .merlin <<EOF
+  > FLG -ppx $PWD/context_ppx.exe -principal
+  > EOF
+  $ $MERLIN server type-enclosing -position 1:5 -filename context.ml < context.ml | jq -r '.value[0].type'
+  string
+
+Restore the original PPX before testing invalidation.
+
   $ cat > .merlin <<EOF
   > FLG -ppx '_build/default/.ppx/68ba10540cd1df30ebd46af5ef6706d9/ppx.exe -as-ppx
   > USE_PPX_CACHE
   > EOF
+  $ $MERLIN server errors -filename main.ml < main.ml > /dev/null
 
 Modifying the source code invalidates the cache
   $ cat >main.ml <<EOF
@@ -213,8 +255,7 @@ cache since the parsetree depends on some config arguments)
   $ $MERLIN server errors -filename main.ml -log-file merlin_logs 1> /dev/null < main.ml
   $ cat merlin_logs | grep 'Phase cache' -A 1 | sed "s/[0-9]*//g"
   # . Phase cache - Reader phase
-  Cache invalidation
-  --
+  Cache hit
   # . Phase cache - PPX phase
   Cache invalidation
 
@@ -312,8 +353,7 @@ And Merlin does the right thing.
   }
   $ cat merlin_logs | grep 'Phase cache' -A 1 | sed "s/[0-9]*//g"
   # . Phase cache - Reader phase
-  Cache invalidation
-  --
+  Cache hit
   # . Phase cache - PPX phase
   Cache invalidation
 
