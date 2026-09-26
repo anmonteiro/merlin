@@ -137,14 +137,14 @@ type of a binding depending on [-principal], without changing its command.
   $ $MERLIN server type-enclosing -position 1:5 -filename context.ml < context.ml | jq -r '.value[0].type'
   int
 
-BUG: the cached expansion ignores the changed PPX context.
+Changing [-principal] invalidates the cached expansion.
 
   $ cat > .merlin <<EOF
   > FLG -ppx $PWD/context_ppx.exe -principal
   > USE_PPX_CACHE
   > EOF
   $ $MERLIN server type-enclosing -position 1:5 -filename context.ml < context.ml | jq -r '.value[0].type'
-  int
+  string
 
 Returning to the first configuration reuses its cached expansion.
 
@@ -255,7 +255,8 @@ cache since the parsetree depends on some config arguments)
   $ $MERLIN server errors -filename main.ml -log-file merlin_logs 1> /dev/null < main.ml
   $ cat merlin_logs | grep 'Phase cache' -A 1 | sed "s/[0-9]*//g"
   # . Phase cache - Reader phase
-  Cache hit
+  Cache invalidation
+  --
   # . Phase cache - PPX phase
   Cache invalidation
 
@@ -353,7 +354,8 @@ And Merlin does the right thing.
   }
   $ cat merlin_logs | grep 'Phase cache' -A 1 | sed "s/[0-9]*//g"
   # . Phase cache - Reader phase
-  Cache hit
+  Cache invalidation
+  --
   # . Phase cache - PPX phase
   Cache invalidation
 
