@@ -152,34 +152,13 @@ module Reader_phase = struct
   let title = "Reader phase"
 
   module Fingerprint = struct
-    type reader_config =
-      { filename : string;
-        warnings : Warnings.state;
-        extensions : string list;
-        suffixes : (string * string) list;
-        reader : string list;
-        extension_to_reader : (string * string) list
-      }
-
     type t =
       { source_digest : Msource.Digest.t;
         for_completion : Msource.position option;
-        config : reader_config
+        config : Mconfig.t
       }
 
-    let make { source = source, _; for_completion; config } =
-      let ocaml = config.Mconfig.ocaml in
-      let merlin = config.Mconfig.merlin in
-      let query = config.Mconfig.query in
-      let config =
-        { filename = query.filename;
-          warnings = ocaml.warnings;
-          extensions = merlin.extensions;
-          suffixes = merlin.suffixes;
-          reader = merlin.reader;
-          extension_to_reader = merlin.extension_to_reader
-        }
-      in
+    let make { source = source, _; for_completion; config; _ } =
       Ok { source_digest = Msource.Digest.make source; for_completion; config }
 
     let equal
@@ -194,7 +173,7 @@ module Reader_phase = struct
       Msource.Digest.equal source_digest_1 source_digest_2
       && Stdlib.Option.equal Msource.equal_position for_completion_1
            for_completion_2
-      && Stdlib.( = ) config_1 config_2
+      && Cache.key config_1 = Cache.key config_2
   end
 end
 
