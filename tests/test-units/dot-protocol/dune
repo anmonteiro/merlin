@@ -1,4 +1,11 @@
 (test
  (name configuration_codec_test)
+ (modules configuration_codec_test)
+ (package merlin-lib)
+ (libraries csexp merlin-lib.dot_protocol merlin-lib.utils))
+
+(test
+ (name file_configurations_test)
+ (modules file_configurations_test)
  (package merlin-lib)
  (libraries csexp merlin-lib.dot_protocol merlin-lib.utils))

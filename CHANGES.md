@@ -2,6 +2,7 @@ unreleased
 ==========
 
   + merlin library
+    - Add the File-Configurations request to the configuration protocol.
     - Add a codec for per-mode file-configuration responses.
     - Include optional counterpart paths in file configurations.
     - Fix a caching issue making inconsistant units stale (#2141)
