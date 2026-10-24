@@ -74,7 +74,12 @@ type directive = Directive.Processed.t
 type source_kind = Implementation | Interface
 
 type configuration =
-  { mode : string; is_default : bool; kind : source_kind; directives : Csexp.t }
+  { mode : string;
+    is_default : bool;
+    kind : source_kind;
+    counterpart : string option;
+    directives : Csexp.t
+  }
 
 module Nonempty_list = struct
   type 'a t = { hd : 'a; tl : 'a list }
@@ -172,19 +177,26 @@ module Sexp = struct
   let bool_field name value =
     string_field name (if value then "true" else "false")
 
-  let from_configuration { mode; is_default; kind; directives } =
+  let option_string_field name = function
+    | None -> []
+    | Some value -> [ string_field name value ]
+
+  let from_configuration { mode; is_default; kind; counterpart; directives } =
     let kind =
       match kind with
       | Implementation -> "implementation"
       | Interface -> "interface"
     in
     List
-      [ Atom "CONFIG";
-        string_field "MODE" mode;
-        bool_field "DEFAULT" is_default;
-        string_field "KIND" kind;
-        List [ Atom "DIRECTIVES"; directives ]
-      ]
+      (List.concat
+         [ [ Atom "CONFIG";
+             string_field "MODE" mode;
+             bool_field "DEFAULT" is_default;
+             string_field "KIND" kind
+           ];
+           option_string_field "COUNTERPART" counterpart;
+           [ List [ Atom "DIRECTIVES"; directives ] ]
+         ])
 
   let configuration_of_sexp sexp =
     let error message = Error (Unexpected_output message) in
@@ -196,14 +208,21 @@ module Sexp = struct
       let mode = ref None in
       let is_default = ref None in
       let kind = ref None in
+      let counterpart = ref None in
+      let counterpart_seen = ref false in
       let directives = ref None in
       let rec loop = function
         | [] -> (
           match (!mode, !is_default, !kind, !directives) with
-          | Some mode, Some is_default, Some kind, Some directives ->
+          | Some mode, Some is_default, Some kind, Some directives -> (
             if String.equal mode "" then
               error "Configuration MODE must not be empty"
-            else Ok { mode; is_default; kind; directives }
+            else
+              match !counterpart with
+              | Some path when Filename.is_relative path ->
+                error "Configuration COUNTERPART must be an absolute path"
+              | counterpart ->
+                Ok { mode; is_default; kind; counterpart; directives })
           | None, _, _, _ -> error "Missing MODE configuration field"
           | _, None, _, _ -> error "Missing DEFAULT configuration field"
           | _, _, None, _ -> error "Missing KIND configuration field"
@@ -239,6 +258,12 @@ module Sexp = struct
               loop fields
             | _ ->
               error "Configuration KIND must be implementation or interface"))
+        | List [ Atom "COUNTERPART"; Atom value ] :: fields ->
+          if !counterpart_seen then duplicate "COUNTERPART"
+          else (
+            counterpart_seen := true;
+            counterpart := Some value;
+            loop fields)
         | List [ Atom "DIRECTIVES"; (List _ as value) ] :: fields -> (
           match !directives with
           | Some _ -> duplicate "DIRECTIVES"
@@ -246,7 +271,10 @@ module Sexp = struct
             directives := Some value;
             loop fields)
         | List
-            (Atom (("MODE" | "DEFAULT" | "KIND" | "DIRECTIVES") as field) :: _)
+            (Atom
+               (("MODE" | "DEFAULT" | "KIND" | "COUNTERPART" | "DIRECTIVES") as
+                field)
+            :: _)
           :: _ -> error ("Invalid " ^ field ^ " configuration field")
         | List (Atom _ :: _) :: fields -> loop fields
         | _ -> error "Unexpected configuration field"
