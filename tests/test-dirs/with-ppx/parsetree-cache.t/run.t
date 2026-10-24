@@ -65,6 +65,62 @@ The cache can be enabled via the USE_PPX_CACHE directive
   # . Phase cache - PPX phase
   Cache hit
 
+Reader and PPX caches distinguish parser configurations. The same source is an
+interface in configuration A and an implementation in configuration B. Returning
+to A produces the correct parse, but recomputes both phases.
+
+  $ cat > mode.ml <<EOF
+  > val value : int
+  > EOF
+  $ cat > .merlin <<EOF
+  > SUFFIX .foo .ml
+  > USE_PPX_CACHE
+  > EOF
+  $ $MERLIN server errors -filename mode.ml -log-file merlin_logs < mode.ml \
+  >   | jq '.value | length'
+  0
+  $ cat merlin_logs | grep 'Phase cache' -A 1 | sed "s/[0-9]*//g"
+  # . Phase cache - Reader phase
+  Cache invalidation
+  --
+  # . Phase cache - PPX phase
+  Cache invalidation
+
+  $ cat > .merlin <<EOF
+  > SUFFIX .ml .mli
+  > USE_PPX_CACHE
+  > EOF
+  $ $MERLIN server errors -filename mode.ml -log-file merlin_logs < mode.ml \
+  >   | jq '.value | length'
+  1
+  $ cat merlin_logs | grep 'Phase cache' -A 1 | sed "s/[0-9]*//g"
+  # . Phase cache - Reader phase
+  Cache invalidation
+  --
+  # . Phase cache - PPX phase
+  Cache invalidation
+
+  $ cat > .merlin <<EOF
+  > SUFFIX .foo .ml
+  > USE_PPX_CACHE
+  > EOF
+  $ $MERLIN server errors -filename mode.ml -log-file merlin_logs < mode.ml \
+  >   | jq '.value | length'
+  0
+  $ cat merlin_logs | grep 'Phase cache' -A 1 | sed "s/[0-9]*//g"
+  # . Phase cache - Reader phase
+  Cache invalidation
+  --
+  # . Phase cache - PPX phase
+  Cache invalidation
+
+Restore the original PPX before testing invalidation.
+
+  $ cat > .merlin <<EOF
+  > FLG -ppx '_build/default/.ppx/68ba10540cd1df30ebd46af5ef6706d9/ppx.exe -as-ppx
+  > USE_PPX_CACHE
+  > EOF
+  $ $MERLIN server errors -filename main.ml < main.ml > /dev/null
 
 Modifying the source code invalidates the cache
   $ cat >main.ml <<EOF
