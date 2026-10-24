@@ -90,6 +90,13 @@ end
 
 type read_error = Unexpected_output of string | Csexp_parse_error of string
 
+type configurations_error =
+  | Unsupported
+  | Server_error of string
+  | Protocol_error of read_error
+
+type file_configurations_request = { unsupported_response : Csexp.t }
+
 module Sexp = struct
   type t = Csexp.t = Atom of string | List of t list
 
@@ -100,11 +107,77 @@ module Sexp = struct
       | Atom s -> Some s
       | _ -> None)
 
+  (* Match Dune's rendering of unknown requests to recognize legacy rejection. *)
+  let atom_is_valid s =
+    let rec loop i =
+      i = String.length s
+      ||
+      match String.unsafe_get s i with
+      | '%' -> after_percent (i + 1)
+      | '"' | '(' | ')' | ';' | '\000' .. '\032' | '\127' .. '\255' -> false
+      | _ -> loop (i + 1)
+    and after_percent i =
+      i = String.length s
+      ||
+      match String.unsafe_get s i with
+      | '%' -> after_percent (i + 1)
+      | '"' | '(' | ')' | ';' | '\000' .. '\032' | '\127' .. '\255' | '{' ->
+        false
+      | _ -> loop (i + 1)
+    in
+    (not (String.equal s "")) && loop 0
+
+  let quoted s =
+    let buffer = Buffer.create (String.length s + 2) in
+    Buffer.add_char buffer '"';
+    let rec loop i =
+      if i < String.length s then
+        let next =
+          match String.unsafe_get s i with
+          | ('"' | '\\') as char ->
+            Buffer.add_char buffer '\\';
+            Buffer.add_char buffer char;
+            i + 1
+          | '\n' ->
+            Buffer.add_string buffer "\\n";
+            i + 1
+          | '\t' ->
+            Buffer.add_string buffer "\\t";
+            i + 1
+          | '\r' ->
+            Buffer.add_string buffer "\\r";
+            i + 1
+          | '\b' ->
+            Buffer.add_string buffer "\\b";
+            i + 1
+          | '%' when i + 1 < String.length s && s.[i + 1] = '{' ->
+            Buffer.add_string buffer "\\%";
+            i + 1
+          | ' ' .. '~' as char ->
+            Buffer.add_char buffer char;
+            i + 1
+          | char ->
+            let decoded = String.get_utf_8_uchar s i in
+            if Uchar.utf_decode_is_valid decoded then (
+              let length = Uchar.utf_decode_length decoded in
+              Buffer.add_substring buffer s i length;
+              i + length)
+            else (
+              Buffer.add_string buffer
+                (Printf.sprintf "\\%03d" (Char.code char));
+              i + 1)
+        in
+        loop next
+    in
+    loop 0;
+    Buffer.add_char buffer '"';
+    Buffer.contents buffer
+
+  let atom_to_string s = if atom_is_valid s then s else quoted s
+
   let rec to_string = function
-    | Atom s -> s
-    | List l ->
-      String.concat ~sep:" "
-        (List.concat [ [ "(" ]; List.map ~f:to_string l; [ ")" ] ])
+    | Atom s -> atom_to_string s
+    | List l -> "(" ^ String.concat ~sep:" " (List.map ~f:to_string l) ^ ")"
 
   let to_directive sexp =
     match sexp with
@@ -336,7 +409,7 @@ let configuration_directives { directives; _ } =
   | Csexp.Atom _ ->
     [ `ERROR_MSG "Unexpected output from external config reader" ]
 
-type command = File of string | Halt | Unknown
+type command = File of string | File_configurations of string | Halt | Unknown
 
 module type S = sig
   type 'a io
@@ -350,10 +423,24 @@ module type S = sig
 
   val write : out_chan -> directive list -> unit io
 
+  val read_configurations :
+    request:file_configurations_request ->
+    in_chan ->
+    ( configuration Nonempty_list.t,
+      configurations_error )
+    Merlin_utils.Std.Result.t
+    io
+
+  val write_configurations :
+    out_chan -> configuration Nonempty_list.t -> unit io
+
   module Commands : sig
     val read_input : in_chan -> command io
 
     val send_file : out_chan -> string -> unit io
+
+    val send_file_configurations :
+      out_chan -> string -> file_configurations_request io
 
     val halt : out_chan -> unit io
   end
@@ -385,12 +472,25 @@ struct
       let+ input = Chan.read chan in
       match input with
       | Ok (List [ Atom "File"; Atom path ]) -> File path
+      | Ok (List [ Atom "File-Configurations"; Atom path ]) ->
+        File_configurations path
       | Ok (Atom "Halt") -> Halt
       | Ok _ -> Unknown
       | Error _ -> Halt
 
     let send_file chan path =
       Chan.write chan Sexp.(List [ Atom "File"; Atom path ])
+
+    let send_file_configurations chan path =
+      let open IO.O in
+      let sexp = Sexp.(List [ Atom "File-Configurations"; Atom path ]) in
+      let unsupported_response =
+        Sexp.(
+          List [ List [ Atom "ERROR"; Atom ("Bad input: " ^ to_string sexp) ] ])
+      in
+      let request = { unsupported_response } in
+      let+ () = Chan.write chan sexp in
+      request
 
     let halt chan = Chan.write chan (Sexp.Atom "Halt")
   end
@@ -410,6 +510,23 @@ struct
 
   let write out_chan (directives : directive list) =
     directives |> Sexp.from_directives |> Chan.write out_chan
+
+  let read_configurations ~request chan =
+    let open IO.O in
+    let+ res = Chan.read chan in
+    match res with
+    | Ok sexp when Stdlib.( = ) sexp request.unsupported_response ->
+      Error Unsupported
+    | Ok (Sexp.List [ Atom "CONFIGURATIONS-ERROR"; Atom message ]) ->
+      Error (Server_error message)
+    | Ok sexp -> (
+      match configurations_of_sexp sexp with
+      | Ok configurations -> Ok configurations
+      | Error error -> Error (Protocol_error error))
+    | Error msg -> Error (Protocol_error (Csexp_parse_error msg))
+
+  let write_configurations out_chan configurations =
+    configurations |> configurations_to_sexp |> Chan.write out_chan
 end
 
 module Blocking =

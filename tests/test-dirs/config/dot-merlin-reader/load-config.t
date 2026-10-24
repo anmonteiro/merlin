@@ -14,6 +14,14 @@ This test comes from: https://github.com/janestreet/merlin-jst/pull/59
   > EOF
   ((?:B?:$TESTCASE_ROOT/build/dir)(?:S?:$TESTCASE_ROOT/source/dir)(?:BH?:$TESTCASE_ROOT/build-hidden/dir)(?:SH?:$TESTCASE_ROOT/source-hidden/dir)(?:STDLIB?:/stdlib)(?:SOURCE_ROOT?:/root))
 
+The dot-merlin reader rejects a plural request and still handles the next legacy
+request.
+
+  $ FILE=$(pwd)/test.ml; dot-merlin-reader <<EOF | sed 's#[0-9]*:#?:#g'
+  > (19:File-Configurations${#FILE}:$FILE)(4:File${#FILE}:$FILE)
+  > EOF
+  ((?:ERROR?:File-Configurations is not supported by dot-merlin-reader))((?:B?:$TESTCASE_ROOT/build/dir)(?:S?:$TESTCASE_ROOT/source/dir)(?:BH?:$TESTCASE_ROOT/build-hidden/dir)(?:SH?:$TESTCASE_ROOT/source-hidden/dir)(?:STDLIB?:/stdlib)(?:SOURCE_ROOT?:/root))
+
   $ echo | $MERLIN single dump-configuration -filename test.ml 2> /dev/null | jq '.value.merlin'
   {
     "build_path": [
