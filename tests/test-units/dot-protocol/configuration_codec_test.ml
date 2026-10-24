@@ -17,7 +17,12 @@ let directives build_dir =
         List [ Atom "UNIT_NAME"; Atom "foo" ]
       ])
 
-let config ?(extra = []) ~mode ~is_default ~kind build_dir =
+let config ?counterpart ?(extra = []) ~mode ~is_default ~kind build_dir =
+  let counterpart =
+    match counterpart with
+    | None -> []
+    | Some path -> [ atom_field "COUNTERPART" path ]
+  in
   Csexp.List
     (List.concat
        [ [ Atom "CONFIG";
@@ -25,6 +30,7 @@ let config ?(extra = []) ~mode ~is_default ~kind build_dir =
            atom_field "DEFAULT" (if is_default then "true" else "false");
            atom_field "KIND" kind
          ];
+         counterpart;
          [ field "DIRECTIVES" (directives build_dir) ];
          extra
        ])
@@ -37,6 +43,7 @@ let () =
     { mode = "ocaml";
       is_default = true;
       kind = Implementation;
+      counterpart = Some "/workspace/lib/foo.mli";
       directives = directives "_build/default/.foo.objs/byte"
     }
   in
@@ -44,6 +51,7 @@ let () =
     { mode = "melange";
       is_default = false;
       kind = Implementation;
+      counterpart = Some "/workspace/lib/foo.melange.mli";
       directives = directives "_build/default/.foo.objs/melange"
     }
   in
@@ -54,12 +62,23 @@ let () =
       fail "two-configuration round trip"
   | Merlin_utils.Std.Result.Error _ -> fail "two-configuration round trip");
 
+  let without_counterpart = { ocaml with counterpart = None } in
+  if
+    configurations_to_sexp (Nonempty_list.create without_counterpart [])
+    <> response
+         [ config ~mode:"ocaml" ~is_default:true ~kind:"implementation"
+             "_build/default/.foo.objs/byte"
+         ]
+  then fail "omitted counterpart encoding";
+
   (* This fixture follows the response format in Dune's prototype. *)
   let dune_golden =
     response
-      [ config ~mode:"ocaml" ~is_default:true ~kind:"implementation"
+      [ config ~counterpart:"/workspace/lib/foo.mli" ~mode:"ocaml"
+          ~is_default:true ~kind:"implementation"
           "_build/default/.foo.objs/byte";
-        config ~mode:"melange" ~is_default:false ~kind:"implementation"
+        config ~counterpart:"/workspace/lib/foo.melange.mli" ~mode:"melange"
+          ~is_default:false ~kind:"implementation"
           "_build/default/.foo.objs/melange"
       ]
   in
@@ -83,14 +102,15 @@ let () =
       not
         (String.equal configuration.mode "future-backend"
         && (not configuration.is_default)
-        && configuration.kind = Interface)
+        && configuration.kind = Interface
+        && configuration.counterpart = None)
     then fail "unknown mode or field preservation"
   | Merlin_utils.Std.Result.Error _ -> fail "sole non-default configuration");
 
   let config_fields =
     match
-      config ~mode:"ocaml" ~is_default:true ~kind:"implementation"
-        "/build/ocaml"
+      config ~counterpart:"/workspace/lib/foo.mli" ~mode:"ocaml"
+        ~is_default:true ~kind:"implementation" "/build/ocaml"
     with
     | Csexp.List (Atom "CONFIG" :: fields) -> fields
     | _ -> fail "test configuration"
@@ -126,6 +146,7 @@ let () =
     [ ("MODE", atom_field "MODE" "ocaml");
       ("DEFAULT", atom_field "DEFAULT" "false");
       ("KIND", atom_field "KIND" "interface");
+      ("COUNTERPART", atom_field "COUNTERPART" "/workspace/lib/other.mli");
       ("DIRECTIVES", field "DIRECTIVES" (directives "/build/other"))
     ];
   List.iter
@@ -138,7 +159,10 @@ let () =
         config ~mode:"ocaml" ~is_default:false ~kind:"module" "/build/ocaml" );
       ( "empty mode",
         config ~mode:"" ~is_default:false ~kind:"implementation" "/build/ocaml"
-      )
+      );
+      ( "relative counterpart",
+        config ~counterpart:"foo.mli" ~mode:"ocaml" ~is_default:false
+          ~kind:"implementation" "/build/ocaml" )
     ];
   expect_error "duplicate mode keys"
     (configurations_of_sexp
