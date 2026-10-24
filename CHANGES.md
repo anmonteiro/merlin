@@ -3,6 +3,7 @@ unreleased
 
   + merlin library
     - Fix a caching issue making inconsistant units stale (#2141)
+    - Retain two parser-phase cache entries when alternating configurations.
 
 merlin 5.9
 ==========

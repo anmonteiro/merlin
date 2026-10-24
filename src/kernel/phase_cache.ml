@@ -20,39 +20,54 @@ module With_cache (Phase : S) = struct
   type t = { output : Phase.output; cache_was_hit : bool }
   type cache = { fingerprint : Phase.Fingerprint.t; output : Phase.output }
 
-  let cache = ref None
+  let capacity = 2
+  let cache = ref []
+
+  let rec find fingerprint before = function
+    | [] -> None
+    | ({ fingerprint = cached_fingerprint; _ } as cached) :: after ->
+      if Phase.Fingerprint.equal cached_fingerprint fingerprint then
+        Some (cached, List.rev_append before after)
+      else find fingerprint (cached :: before) after
+
+  let add fingerprint output entries =
+    cache := { fingerprint; output } :: Std.List.take_n (capacity - 1) entries
 
   let apply ?(cache_disabling = None) ?(force_invalidation = false) input =
     let title = Phase.title in
     match cache_disabling with
     | Some reason ->
       log ~title "Cache is disabled: %s" reason;
-      cache := None;
+      cache := [];
       let output = Phase.f input in
       { output; cache_was_hit = false }
     | None -> (
       let new_fingerprint = Phase.Fingerprint.make input in
-      match (!cache, new_fingerprint) with
-      | None, Ok new_fingerprint ->
-        log ~title "Cache wasn't populated\n";
-        let output = Phase.f input in
-        cache := Some { fingerprint = new_fingerprint; output };
-        { output; cache_was_hit = false }
-      | Some { fingerprint; output }, Ok new_fingerprint ->
-        if
-          (not force_invalidation)
-          && Phase.Fingerprint.equal fingerprint new_fingerprint
-        then (
+      match new_fingerprint with
+      | Ok new_fingerprint -> (
+        let cached = find new_fingerprint [] !cache in
+        match cached with
+        | Some (({ output; _ } as entry), remaining) when not force_invalidation
+          ->
+          cache := entry :: remaining;
           log ~title "Cache hit";
-          { output; cache_was_hit = true })
-        else (
-          log ~title "Cache invalidation";
+          { output; cache_was_hit = true }
+        | None | Some _ ->
+          log ~title
+            (match !cache with
+            | [] -> "Cache wasn't populated\n"
+            | _ :: _ -> "Cache invalidation");
+          let entries =
+            match cached with
+            | None -> !cache
+            | Some (_, remaining) -> remaining
+          in
           let output = Phase.f input in
-          cache := Some { fingerprint = new_fingerprint; output };
+          add new_fingerprint output entries;
           { output; cache_was_hit = false })
-      | (None | Some _), Error err ->
+      | Error err ->
         log ~title "Cache workflow is incomplete: %s" err;
-        cache := None;
+        cache := [];
         let output = Phase.f input in
         { output; cache_was_hit = false })
 end
