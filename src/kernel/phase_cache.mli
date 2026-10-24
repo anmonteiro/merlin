@@ -1,4 +1,4 @@
-(** An all-or-nothing cache mechanism that can be used for any phase *)
+(** An all-or-nothing, two-entry LRU cache that can be used for any phase *)
 
 module type S = sig
   (** Phase input *)
@@ -32,9 +32,9 @@ module With_cache (Phase : S) : sig
       computation [Phase.f phase_input], if there's some [cache_disabling].
       Otherwise, the phase computation is run with a cache mechanism. Whether
       the cache is invalidated depends on the outcome of a [Phase.Fingerprint]
-      comparison between the current fingerprint and the last one. Additionally,
-      the invalidation of the cache can be forced by setting the
-      force_invalidation parameter to true.*)
+      comparison between the current fingerprint and cached fingerprints.
+      Additionally, recomputation of the current entry can be forced by setting
+      the force_invalidation parameter to true.*)
   val apply :
     ?cache_disabling:string option ->
     ?force_invalidation:bool ->

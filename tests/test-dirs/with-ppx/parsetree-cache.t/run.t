@@ -65,9 +65,9 @@ The cache can be enabled via the USE_PPX_CACHE directive
   # . Phase cache - PPX phase
   Cache hit
 
-Reader and PPX caches distinguish parser configurations. The same source is an
-interface in configuration A and an implementation in configuration B. Returning
-to A produces the correct parse, but recomputes both phases.
+Reader and PPX caches retain distinct parser configurations. The same source is
+an interface in configuration A and an implementation in configuration B; the
+final A request must both recover A's parse and reuse its cache entries.
 
   $ cat > mode.ml <<EOF
   > val value : int
@@ -109,10 +109,9 @@ to A produces the correct parse, but recomputes both phases.
   0
   $ cat merlin_logs | grep 'Phase cache' -A 1 | sed "s/[0-9]*//g"
   # . Phase cache - Reader phase
-  Cache invalidation
-  --
+  Cache hit
   # . Phase cache - PPX phase
-  Cache invalidation
+  Cache hit
 
 Compiler flags are visible to PPXs through their context. This PPX changes the
 type of a binding depending on [-principal], without changing its command.
@@ -147,7 +146,7 @@ Changing [-principal] invalidates the cached expansion.
   $ $MERLIN server type-enclosing -position 1:5 -filename context.ml < context.ml | jq -r '.value[0].type'
   string
 
-Returning to the first configuration recomputes the original expansion.
+Returning to the first configuration reuses its cached expansion.
 
   $ cat > .merlin <<EOF
   > FLG -ppx $PWD/context_ppx.exe
@@ -157,10 +156,9 @@ Returning to the first configuration recomputes the original expansion.
   int
   $ cat merlin_logs | grep 'Phase cache' -A 1 | sed "s/[0-9]*//g"
   # . Phase cache - Reader phase
-  Cache invalidation
-  --
+  Cache hit
   # . Phase cache - PPX phase
-  Cache invalidation
+  Cache hit
 
 Without the cache, [-principal] correctly changes the expansion.
 
