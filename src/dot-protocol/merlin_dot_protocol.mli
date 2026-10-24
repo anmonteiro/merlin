@@ -83,7 +83,29 @@ end
 
 type directive = Directive.Processed.t
 
+type source_kind = Implementation | Interface
+
+type configuration =
+  { mode : string; is_default : bool; kind : source_kind; directives : Csexp.t }
+
+val configuration_directives : configuration -> directive list
+
+module Nonempty_list : sig
+  type 'a t = private { hd : 'a; tl : 'a list }
+
+  val create : 'a -> 'a list -> 'a t
+  val to_list : 'a t -> 'a list
+end
+
 type read_error = Unexpected_output of string | Csexp_parse_error of string
+
+val configurations_to_sexp : configuration Nonempty_list.t -> Csexp.t
+
+(** Decode a nonempty configuration set with unique modes and at most one
+    default. Unknown modes and fields are accepted for forward compatibility. *)
+val configurations_of_sexp :
+  Csexp.t ->
+  (configuration Nonempty_list.t, read_error) Merlin_utils.Std.Result.t
 
 type command = File of string | Halt | Unknown
 
