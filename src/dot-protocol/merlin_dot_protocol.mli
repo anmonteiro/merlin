@@ -112,7 +112,14 @@ val configurations_of_sexp :
   Csexp.t ->
   (configuration Nonempty_list.t, read_error) Merlin_utils.Std.Result.t
 
-type command = File of string | Halt | Unknown
+type configurations_error =
+  | Unsupported
+  | Server_error of string
+  | Protocol_error of read_error
+
+type file_configurations_request
+
+type command = File of string | File_configurations of string | Halt | Unknown
 
 module type S = sig
   type 'a io
@@ -126,10 +133,28 @@ module type S = sig
 
   val write : out_chan -> directive list -> unit io
 
+  (** [Unsupported] identifies the legacy Dune rejection of [request].
+      Malformed responses are reported as [Protocol_error], not [Unsupported]. *)
+  val read_configurations :
+    request:file_configurations_request ->
+    in_chan ->
+    ( configuration Nonempty_list.t,
+      configurations_error )
+    Merlin_utils.Std.Result.t
+    io
+
+  val write_configurations :
+    out_chan -> configuration Nonempty_list.t -> unit io
+
   module Commands : sig
     val read_input : in_chan -> command io
 
     val send_file : out_chan -> string -> unit io
+
+    (** [send_file_configurations channel path] returns the request token that
+        must be passed to [read_configurations]. *)
+    val send_file_configurations :
+      out_chan -> string -> file_configurations_request io
 
     val halt : out_chan -> unit io
   end
