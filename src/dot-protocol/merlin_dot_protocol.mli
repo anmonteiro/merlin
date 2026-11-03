@@ -86,7 +86,12 @@ type directive = Directive.Processed.t
 type source_kind = Implementation | Interface
 
 type configuration =
-  { mode : string; is_default : bool; kind : source_kind; directives : Csexp.t }
+  { mode : string;
+    is_default : bool;
+    kind : source_kind;
+    counterpart : string option;
+    directives : Csexp.t
+  }
 
 val configuration_directives : configuration -> directive list
 
