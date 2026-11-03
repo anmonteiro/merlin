@@ -114,6 +114,62 @@ to A produces the correct parse, but recomputes both phases.
   # . Phase cache - PPX phase
   Cache invalidation
 
+Compiler flags are visible to PPXs through their context. This PPX changes the
+type of a binding depending on [-principal], without changing its command.
+
+  $ cat > context_ppx.ml <<'EOF'
+  > let () =
+  >   Ast_mapper.register "context" (fun _ ->
+  >     { Ast_mapper.default_mapper with
+  >       structure = (fun _ _ ->
+  >         let source =
+  >           if !Clflags.principal then "let value = \"principal\""
+  >           else "let value = 0"
+  >         in
+  >         Parse.implementation (Lexing.from_string source))
+  >     })
+  > EOF
+  $ $OCAMLC -I +compiler-libs ocamlcommon.cma context_ppx.ml -o context_ppx.exe
+  $ echo 'let value = 0' > context.ml
+  $ cat > .merlin <<EOF
+  > FLG -ppx $PWD/context_ppx.exe
+  > USE_PPX_CACHE
+  > EOF
+  $ $MERLIN server type-enclosing -position 1:5 -filename context.ml < context.ml | jq -r '.value[0].type'
+  int
+
+Changing [-principal] invalidates the cached expansion.
+
+  $ cat > .merlin <<EOF
+  > FLG -ppx $PWD/context_ppx.exe -principal
+  > USE_PPX_CACHE
+  > EOF
+  $ $MERLIN server type-enclosing -position 1:5 -filename context.ml < context.ml | jq -r '.value[0].type'
+  string
+
+Returning to the first configuration recomputes the original expansion.
+
+  $ cat > .merlin <<EOF
+  > FLG -ppx $PWD/context_ppx.exe
+  > USE_PPX_CACHE
+  > EOF
+  $ $MERLIN server type-enclosing -position 1:5 -filename context.ml -log-file merlin_logs < context.ml | jq -r '.value[0].type'
+  int
+  $ cat merlin_logs | grep 'Phase cache' -A 1 | sed "s/[0-9]*//g"
+  # . Phase cache - Reader phase
+  Cache invalidation
+  --
+  # . Phase cache - PPX phase
+  Cache invalidation
+
+Without the cache, [-principal] correctly changes the expansion.
+
+  $ cat > .merlin <<EOF
+  > FLG -ppx $PWD/context_ppx.exe -principal
+  > EOF
+  $ $MERLIN server type-enclosing -position 1:5 -filename context.ml < context.ml | jq -r '.value[0].type'
+  string
+
 Restore the original PPX before testing invalidation.
 
   $ cat > .merlin <<EOF
