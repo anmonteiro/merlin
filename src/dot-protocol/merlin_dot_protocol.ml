@@ -71,6 +71,20 @@ end
 
 type directive = Directive.Processed.t
 
+type source_kind = Implementation | Interface
+
+type configuration =
+  { mode : string; is_default : bool; kind : source_kind; directives : Csexp.t }
+
+module Nonempty_list = struct
+  type 'a t = { hd : 'a; tl : 'a list }
+
+  let create hd tl = { hd; tl }
+  let to_list { hd; tl } = hd :: tl
+end
+
+type read_error = Unexpected_output of string | Csexp_parse_error of string
+
 module Sexp = struct
   type t = Csexp.t = Atom of string | List of t list
 
@@ -153,9 +167,146 @@ module Sexp = struct
       List (Atom tag :: body)
     in
     List (List.map ~f directives)
+
+  let string_field name value = List [ Atom name; Atom value ]
+  let bool_field name value =
+    string_field name (if value then "true" else "false")
+
+  let from_configuration { mode; is_default; kind; directives } =
+    let kind =
+      match kind with
+      | Implementation -> "implementation"
+      | Interface -> "interface"
+    in
+    List
+      [ Atom "CONFIG";
+        string_field "MODE" mode;
+        bool_field "DEFAULT" is_default;
+        string_field "KIND" kind;
+        List [ Atom "DIRECTIVES"; directives ]
+      ]
+
+  let configuration_of_sexp sexp =
+    let error message = Error (Unexpected_output message) in
+    let duplicate field =
+      error ("Duplicate " ^ field ^ " configuration field")
+    in
+    match sexp with
+    | List (Atom "CONFIG" :: fields) ->
+      let mode = ref None in
+      let is_default = ref None in
+      let kind = ref None in
+      let directives = ref None in
+      let rec loop = function
+        | [] -> (
+          match (!mode, !is_default, !kind, !directives) with
+          | Some mode, Some is_default, Some kind, Some directives ->
+            if String.equal mode "" then
+              error "Configuration MODE must not be empty"
+            else Ok { mode; is_default; kind; directives }
+          | None, _, _, _ -> error "Missing MODE configuration field"
+          | _, None, _, _ -> error "Missing DEFAULT configuration field"
+          | _, _, None, _ -> error "Missing KIND configuration field"
+          | _, _, _, None -> error "Missing DIRECTIVES configuration field")
+        | List [ Atom "MODE"; Atom value ] :: fields -> (
+          match !mode with
+          | Some _ -> duplicate "MODE"
+          | None ->
+            mode := Some value;
+            loop fields)
+        | List [ Atom "DEFAULT"; Atom value ] :: fields -> (
+          match !is_default with
+          | Some _ -> duplicate "DEFAULT"
+          | None -> (
+            match value with
+            | "true" ->
+              is_default := Some true;
+              loop fields
+            | "false" ->
+              is_default := Some false;
+              loop fields
+            | _ -> error "Configuration DEFAULT must be true or false"))
+        | List [ Atom "KIND"; Atom value ] :: fields -> (
+          match !kind with
+          | Some _ -> duplicate "KIND"
+          | None -> (
+            match value with
+            | "implementation" ->
+              kind := Some Implementation;
+              loop fields
+            | "interface" ->
+              kind := Some Interface;
+              loop fields
+            | _ ->
+              error "Configuration KIND must be implementation or interface"))
+        | List [ Atom "DIRECTIVES"; (List _ as value) ] :: fields -> (
+          match !directives with
+          | Some _ -> duplicate "DIRECTIVES"
+          | None ->
+            directives := Some value;
+            loop fields)
+        | List
+            (Atom (("MODE" | "DEFAULT" | "KIND" | "DIRECTIVES") as field) :: _)
+          :: _ -> error ("Invalid " ^ field ^ " configuration field")
+        | List (Atom _ :: _) :: fields -> loop fields
+        | _ -> error "Unexpected configuration field"
+      in
+      loop fields
+    | _ -> error "Unexpected configuration from external config reader"
+
+  let configurations_of_sexp = function
+    | List [ Atom "CONFIGURATIONS"; List configurations ] ->
+      let rec loop acc = function
+        | [] -> (
+          match List.rev acc with
+          | [] -> Error (Unexpected_output "Empty configuration response")
+          | configuration :: configurations ->
+            let all = configuration :: configurations in
+            let rec validate seen_modes seen_default = function
+              | [] -> Ok (Nonempty_list.create configuration configurations)
+              | { mode; is_default; _ } :: configurations ->
+                if List.exists seen_modes ~f:(String.equal mode) then
+                  Error
+                    (Unexpected_output ("Duplicate configuration MODE: " ^ mode))
+                else if is_default && seen_default then
+                  Error (Unexpected_output "Multiple default configurations")
+                else
+                  validate (mode :: seen_modes)
+                    (seen_default || is_default)
+                    configurations
+            in
+            validate [] false all)
+        | configuration :: configurations -> (
+          match configuration_of_sexp configuration with
+          | Ok configuration -> loop (configuration :: acc) configurations
+          | Error _ as error -> error)
+      in
+      loop [] configurations
+    | sexp ->
+      let msg =
+        Printf.sprintf
+          "A tagged configuration response was expected, instead got: \"%s\""
+          (to_string sexp)
+      in
+      Error (Unexpected_output msg)
+
+  let from_configurations configurations =
+    List
+      [ Atom "CONFIGURATIONS";
+        List
+          (Nonempty_list.to_list configurations
+          |> List.map ~f:from_configuration)
+      ]
 end
 
-type read_error = Unexpected_output of string | Csexp_parse_error of string
+let configurations_to_sexp = Sexp.from_configurations
+let configurations_of_sexp = Sexp.configurations_of_sexp
+
+let configuration_directives { directives; _ } =
+  match directives with
+  | Csexp.List directives -> List.map directives ~f:Sexp.to_directive
+  | Csexp.Atom _ ->
+    [ `ERROR_MSG "Unexpected output from external config reader" ]
 
 type command = File of string | Halt | Unknown
 

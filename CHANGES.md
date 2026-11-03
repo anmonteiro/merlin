@@ -2,6 +2,7 @@ unreleased
 ==========
 
   + merlin library
+    - Add a codec for per-mode file-configuration responses.
     - Fix a caching issue making inconsistant units stale (#2141)
   + ocaml index
     - Fix a regression due to the new "pointing indexes" mechanism (#2144)
