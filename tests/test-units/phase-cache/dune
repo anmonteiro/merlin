@@ -1,0 +1,4 @@
+(test
+ (name phase_cache_test)
+ (package merlin-lib)
+ (libraries merlin-lib.kernel))
