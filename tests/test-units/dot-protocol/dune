@@ -1,0 +1,4 @@
+(test
+ (name dot_protocol_test)
+ (package merlin-lib)
+ (libraries csexp merlin-lib.dot_protocol merlin-lib.utils))
